@@ -1,3 +1,4 @@
+import platform
 import argparse
 import re
 import subprocess
@@ -7,14 +8,13 @@ import llm
 import tempfile
 
 
-def record_voice(file_path, verbose):
+def record_voice(file_path):
     """Records voice using sox and saves to a temporary file."""
     try:
         with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as temp_wav:
             temp_wav_path = temp_wav.name
 
-        if verbose:
-            print("Recording. Press Ctrl+C to stop.")
+        print("Recording. Press Ctrl+C to stop.")
 
         sox_process = subprocess.Popen(["sox", "-q", "-d", temp_wav_path])
         sox_process.wait()
@@ -22,8 +22,7 @@ def record_voice(file_path, verbose):
     except KeyboardInterrupt:
         sox_process.terminate()
         sox_process.wait()
-        if verbose:
-            print("Recording stopped.")
+        print("Recording stopped.")
 
     subprocess.run(["sox", temp_wav_path, file_path])
     os.remove(temp_wav_path)
@@ -36,9 +35,49 @@ def convert_to_text(file_path):
     return transcription["text"]
 
 
-def run_llm(text, model):
-    """Runs llm to get a bash script for the transcribed text."""
-    return model.prompt(f"Give me a bash script inside ```bash ``` to do the following: {text}").text()
+def get_system_info():
+    uname_info = platform.uname()
+    if uname_info.system == 'Darwin':
+        mac_info = platform.mac_ver()
+        uname_info = f"macOS {mac_info[0]} ({mac_info[2]})"
+    else:
+        uname_info = uname_info.system
+
+    username = os.getlogin()
+    shell = os.environ.get("SHELL", "Unknown")
+    curr_dir = os.getcwd()
+    ls_output = subprocess.check_output("ls", text=True).strip()
+
+    system_info_str = f"OS: {uname_info},\n" \
+                      f"User: {username},\n" \
+                      f"Shell: {shell},\n" \
+                      f"Current Directory: {curr_dir},\n" \
+                      f"Output of ls: \n{ls_output}"
+    return system_info_str
+
+
+def read_file(file_path):
+    with open(file_path, 'r') as f:
+        return f.read()
+
+
+def run_llm(text, model, context_file_path=None):
+    sys_info = get_system_info()
+
+    file_content = ''
+    context_prompt = ''
+    if context_file_path:
+        file_content = read_file(context_file_path)
+        file_name = os.path.basename(context_file_path)
+        context_prompt = (f"Context File Name: {file_name}\n"
+                          f"Context File Content: {file_content:.10000}\n\n")
+
+    prompt = (f"System Info:\n{sys_info}\n\n"
+              f"{context_prompt}\n\n"
+              "Give me a shell script inside ```bash ``` to do the following:\n\n"
+              f"{text}")
+
+    return model.prompt(prompt).text()
 
 
 def extract_script(text):
@@ -64,11 +103,13 @@ if __name__ == '__main__':
                         help="Automatically run the script without asking")
     parser.add_argument("-v", "--verbose", action="store_true",
                         help="Verbose output")
+    parser.add_argument("-c", "--context_file", default=None,
+                        help="Context file for LLM prompt")
 
     args = parser.parse_args()
     file_path = os.path.join(args.dir_path, args.file_name)
 
-    record_voice(file_path, args.verbose)
+    record_voice(file_path)
 
     if args.verbose:
         print()
@@ -83,7 +124,8 @@ if __name__ == '__main__':
 
     if not args.skip_llm:
         model = llm.get_model(args.model_name)
-        llm_output = run_llm(transcribed_text, model)
+        context_file_path = args.context_file
+        llm_output = run_llm(transcribed_text, model, context_file_path)
 
         if args.verbose:
             print("LLM output:")
@@ -92,19 +134,19 @@ if __name__ == '__main__':
 
         script_text = extract_script(llm_output)[0]
 
-        if args.verbose:
-            print("Script:")
-            print(script_text)
-
         script_file_path = os.path.join(args.dir_path, "bash_script.sh")
         with open(script_file_path, "w") as f:
             f.write(script_text)
 
+        if args.verbose:
+            subprocess.run(["bat", script_file_path])
+            # print("Script:")
+            # print(script_text)
+
         if not args.auto_run:
-            print("Do you want to run the script? [Yn]")
+            print("Do you want to run the script? [Y/n]")
             answer = input().strip().lower()
             if answer != "n":
                 subprocess.run(["bash", script_file_path])
         else:
             subprocess.run(["bash", script_file_path])
-
