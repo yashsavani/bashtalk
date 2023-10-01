@@ -56,25 +56,30 @@ def get_system_info():
     return system_info_str
 
 
-def read_file(file_path):
-    with open(file_path, 'r') as f:
-        return f.read()
+def read_files(file_paths):
+    file_contents = {}
+    for path in file_paths:
+        with open(path, 'r') as f:
+            file_contents[os.path.basename(path)] = f.read()
+    return file_contents
 
 
-def run_llm(text, model, context_file_path=None):
+def run_llm(text, model, context_file_paths=None):
     sys_info = get_system_info()
 
-    file_content = ''
     context_prompt = ''
-    if context_file_path:
-        file_content = read_file(context_file_path)
-        file_name = os.path.basename(context_file_path)
-        context_prompt = (f"Context File Name: {file_name}\n"
-                          f"Context File Content: {file_content:.10000}\n\n")
+    if context_file_paths:
+        file_contents = read_files(context_file_paths)
+        context_prompt += "Context Files:\n"
+        for file_name, content in file_contents.items():
+            # Limit content length
+            context_prompt += f"{file_name}: {content[:1000]}\n"
 
     prompt = (f"System Info:\n{sys_info}\n\n"
               f"{context_prompt}\n\n"
               "Give me a shell script inside ```bash ``` to do the following:\n\n"
+              "You can utilize the cli command `llm -m 4 <prompt>` in the bash script to run an large language model with a prompt if needed.\n"
+              "You can utilize the GNU parallel command to run multiple commands in parallel.\n"
               f"{text}")
 
     return model.prompt(prompt).text()
@@ -90,7 +95,7 @@ def extract_script(text):
 
 
 if __name__ == '__main__':
-    parser = argparse.ArgumentParser(description="Voice to Text to Script CLI")
+    parser = argparse.ArgumentParser(description="bashtalk")
     parser.add_argument("-d", "--dir_path", default="/tmp",
                         help="Directory to save files")
     parser.add_argument(
@@ -103,8 +108,8 @@ if __name__ == '__main__':
                         help="Automatically run the script without asking")
     parser.add_argument("-v", "--verbose", action="store_true",
                         help="Verbose output")
-    parser.add_argument("-c", "--context_file", default=None,
-                        help="Context file for LLM prompt")
+    parser.add_argument("-c", "--context_files", nargs="*", default=[],
+                        help="Context files for LLM prompt")
 
     args = parser.parse_args()
     file_path = os.path.join(args.dir_path, args.file_name)
@@ -124,8 +129,8 @@ if __name__ == '__main__':
 
     if not args.skip_llm:
         model = llm.get_model(args.model_name)
-        context_file_path = args.context_file
-        llm_output = run_llm(transcribed_text, model, context_file_path)
+        context_file_paths = args.context_files
+        llm_output = run_llm(transcribed_text, model, context_file_paths)
 
         if args.verbose:
             print("LLM output:")
