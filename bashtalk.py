@@ -94,7 +94,7 @@ def extract_script(text):
     return matches
 
 
-if __name__ == '__main__':
+def main():
     parser = argparse.ArgumentParser(description="bashtalk")
     parser.add_argument("-d", "--dir_path", default="/tmp",
                         help="Directory to save files")
@@ -155,3 +155,6 @@ if __name__ == '__main__':
                 subprocess.run(["bash", script_file_path])
         else:
             subprocess.run(["bash", script_file_path])
+
+if __name__ == '__main__':
+    main()
